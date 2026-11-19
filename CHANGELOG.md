@@ -13,6 +13,7 @@ All notable changes to Oribi are recorded here.
 - Print each warning message once in `to_markdown()`: a column lists its warnings by severity and title and points to "Analytical warnings", which keeps the full message, implication and suggestion (#44).
 - Report `timedelta64` columns with the logical type `duration` and stop treating unique durations as identifiers or as a single-column key/grain (#45).
 - Escape Markdown characters in column names in `to_markdown()` and collapse line breaks in them, so names render as literal text in headings, bold text, relationships and warnings (#39).
+- Warn on text columns with more than 100 distinct values (`high_cardinality_text`), with distinct-count evidence, unless the column is inferred as an identifier (#7).
 
 ## 0.1.0 — Initial release
 
