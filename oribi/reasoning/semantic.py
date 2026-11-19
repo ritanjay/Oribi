@@ -44,8 +44,9 @@ def infer_semantic(
             f"Observed {distinct} distinct non-missing values",
             {"distinct_count": distinct, "row_count": row_count},
         ))
-    if row_count and rate >= .98 and distinct > 1:
+    if row_count and rate >= .98 and distinct > 1 and logical_type != "duration":
         # Uniqueness is supporting evidence, not proof of business identity.
+        # Elapsed durations are skipped: unique durations do not identify entities.
         # It is deliberately weaker for numeric columns, which commonly hold
         # continuous measures that happen to be unique in small samples.
         unique_vote = .28 if logical_type == "numeric" else .62

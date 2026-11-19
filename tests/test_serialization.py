@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from oribi import inspect
 from oribi.serialization.context import _format_aggregations, _format_range_value
 
@@ -88,6 +90,58 @@ def test_result_mappings_cannot_be_mutated_through_the_snapshot(sales_frame):
     assert context.to_dict()["columns"][2]["statistics"]["quantiles"]["0.5"] == 6.25
 
 
+@pytest.mark.parametrize(
+    "new_value,mutate",
+    [
+        pytest.param(lambda: ["a"], lambda value: value.append("later"), id="list"),
+        pytest.param(lambda: {"label": "a"}, lambda value: value.update(label="later"), id="dictionary"),
+        pytest.param(
+            lambda: {"labels": ["a"]},
+            lambda value: value["labels"].append("later"),
+            id="nested-list",
+        ),
+    ],
+)
+def test_inspect_snapshots_mutable_top_values(new_value, mutate):
+    import pandas as pd
+
+    frame = pd.DataFrame({"value": [new_value(), new_value()], "region": ["East", "East"]})
+    context = inspect(frame)
+    expected = new_value()
+    statistics = context.columns[0].statistics
+    assert statistics.top_values == ((expected, 2),)
+    before = context.to_dict(include_values=True)
+    assert before["columns"][0]["statistics"]["top_values"] == [[expected, 2]]
+    json_before = context.to_json(include_values=True)
+    markdown_before = context.to_markdown(include_values=True)
+    compact_before = context.to_context(include_values=True)
+
+    mutate(frame.at[0, "value"])
+
+    assert statistics.top_values == ((expected, 2),)
+    assert context.columns[1].statistics.top_values == (("East", 2),)
+    assert context.to_dict(include_values=True) == before
+    assert context.to_json(include_values=True) == json_before
+    assert context.to_markdown(include_values=True) == markdown_before
+    assert context.to_context(include_values=True) == compact_before
+
+
+def test_inspect_preserves_cycles_and_shared_items_in_a_snapshot():
+    import pandas as pd
+
+    shared = ["a"]
+    value = {"first": shared, "second": shared}
+    value["cycle"] = value
+    context = inspect(pd.DataFrame({"value": [value]}))
+    snapshot, count = context.columns[0].statistics.top_values[0]
+
+    assert count == 1
+    assert snapshot is not value
+    assert snapshot["cycle"] is snapshot
+    assert snapshot["first"] is snapshot["second"]
+    assert snapshot["first"] is not shared
+
+
 def test_context_limit_keeps_an_explicit_marker_for_long_labels():
     import pandas as pd
 
@@ -127,3 +181,31 @@ def test_markdown_warning_change_leaves_structured_output_alone():
     exported = context.to_dict()
     assert any(w["code"] == "negative_measure_values" for w in exported["warnings"])
     assert json.loads(context.to_json()) == exported
+
+
+def test_markdown_renders_column_names_as_literal_text():
+    import pandas as pd
+
+    frame = pd.DataFrame(
+        {
+            "a*b": [-1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 100.0],
+            "`code`": list("abababab"),
+            "line\nbreak": range(8),
+            "# head": [1] * 8,
+            "order_id": list("aabbccdd"),
+        }
+    )
+    markdown = inspect(frame).to_markdown()
+
+    # Markdown characters are escaped and a newline never splits a line.
+    assert r"### a\*b" in markdown
+    assert r"### \`code\`" in markdown
+    assert r"### \# head" in markdown
+    assert "### line break" in markdown
+    assert r"- **a\*b**: numeric measure" in markdown
+    assert r"Negative values in a\*b" in markdown
+    assert "a*b" not in markdown.replace(r"a\*b", "")
+    assert "line\nbreak" not in markdown
+    # Underscores inside a word are left readable.
+    assert "### order_id" in markdown
+    assert r"order\_id" not in markdown

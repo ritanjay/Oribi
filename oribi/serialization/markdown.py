@@ -1,6 +1,23 @@
 """Human-readable context report."""
 
+import re
 from typing import Any
+
+_MARKDOWN_SPECIALS = re.compile(r"[\\`*\[\]<>~|]|(?<![0-9A-Za-z])_|_(?![0-9A-Za-z])")
+_LINE_BREAKS = re.compile(r"\s*[\r\n]+\s*")
+
+
+def _md(value: Any) -> str:
+    """Render a column name or message as literal text inside a Markdown line.
+
+    Markdown control characters are backslash-escaped and line breaks are
+    collapsed to a single space, so a column name cannot start a new block or
+    change the formatting around it. Underscores between letters or digits
+    (``order_id``) are left alone because they never create emphasis.
+    """
+    text = _LINE_BREAKS.sub(" ", str(value))
+    text = _MARKDOWN_SPECIALS.sub(lambda match: "\\" + match.group(0), text)
+    return "\\" + text if text.startswith("#") else text
 
 
 def to_markdown(context: Any, *, include_values: bool = False) -> str:
@@ -17,18 +34,18 @@ def to_markdown(context: Any, *, include_values: bool = False) -> str:
         lines.append(f"- Duplicate rows: {profile.duplicate_row_count:,}")
     if profile.index is not None:
         index = profile.index
-        names = ", ".join(str(name) if name is not None else f"level {i}" for i, name in enumerate(index.names))
+        names = ", ".join(_md(name) if name is not None else f"level {i}" for i, name in enumerate(index.names))
         lines.append(f"- DataFrame index ({names}): {index.unique_count:,} unique; {index.duplicate_count:,} duplicates; {index.missing_count:,} rows with null index values. Use the index or reset_index() to access its fields.")
 
     lines += ["", "## Grain", ""]
     if context.grain and context.grain.status == "estimated":
-        label = " + ".join(context.grain.columns) or context.grain.label
+        label = " + ".join(_md(c) for c in context.grain.columns) or _md(context.grain.label)
         lines.append(f"**{label}** · candidate observation grain · confidence {context.grain.confidence:.0%}")
     else:
         lines.append("Unknown · insufficient evidence")
     if context.grain and context.grain.evidence:
         lines += ["", "<details>", "<summary>Grain inference evidence</summary>", ""]
-        lines.extend(f"- {e.statement}" for e in context.grain.evidence)
+        lines.extend(f"- {_md(e.statement)}" for e in context.grain.evidence)
         lines += ["", "</details>"]
 
     role_labels = {
@@ -43,7 +60,7 @@ def to_markdown(context: Any, *, include_values: bool = False) -> str:
     }
     lines += ["", "## Column roles", ""]
     lines.extend(
-        f"- **{column.name}**: {role_labels.get(column.semantic.role, column.semantic.role)} "
+        f"- **{_md(column.name)}**: {role_labels.get(column.semantic.role, column.semantic.role)} "
         f"({column.semantic.confidence:.0%} confidence)"
         for column in sorted(context.columns, key=lambda item: item.name)
     )
@@ -53,7 +70,7 @@ def to_markdown(context: Any, *, include_values: bool = False) -> str:
         rendered_composite_keys: set[frozenset[str]] = set()
         for column in sorted(context.columns, key=lambda item: item.name):
             for relationship in column.relationships:
-                statement = relationship.evidence[0].statement if relationship.evidence else "observed structural evidence"
+                statement = _md(relationship.evidence[0].statement) if relationship.evidence else "observed structural evidence"
                 strength = (
                     f"; {relationship.evidence_strength:.0%} evidence strength"
                     if relationship.evidence_strength is not None else ""
@@ -61,21 +78,21 @@ def to_markdown(context: Any, *, include_values: bool = False) -> str:
                 if relationship.kind == "identifies_observations":
                     exact = column.cardinality is not None and column.cardinality.uniqueness_ratio == 1 and column.cardinality.missing_count == 0
                     description = "appears to identify observations" if exact else "is a mostly-unique observation-key candidate"
-                    lines.append(f"- **{column.name}** {description} ({statement}{strength}; {relationship.confidence:.0%} confidence).")
+                    lines.append(f"- **{_md(column.name)}** {description} ({statement}{strength}; {relationship.confidence:.0%} confidence).")
                 elif relationship.kind == "jointly_identifies_observations":
                     composite_key = frozenset((column.name, *relationship.related_columns))
                     if composite_key in rendered_composite_keys:
                         continue
                     rendered_composite_keys.add(composite_key)
-                    components = " + ".join((column.name, *relationship.related_columns))
+                    components = " + ".join(_md(c) for c in (column.name, *relationship.related_columns))
                     lines.append(f"- **{components}** jointly identify observations ({statement}{strength}; {relationship.confidence:.0%} confidence).")
                 elif relationship.kind == "groups_observations":
-                    lines.append(f"- **{column.name}** groups observations ({statement}{strength}; {relationship.confidence:.0%} confidence).")
+                    lines.append(f"- **{_md(column.name)}** groups observations ({statement}{strength}; {relationship.confidence:.0%} confidence).")
                 elif relationship.kind == "measure_at_grain":
-                    grain = " + ".join(relationship.related_columns) if relationship.related_columns else "the observed record grain"
-                    lines.append(f"- **{column.name}** is a quantitative measure at {grain} ({statement}{strength}; {relationship.confidence:.0%} confidence).")
+                    grain = " + ".join(_md(c) for c in relationship.related_columns) if relationship.related_columns else "the observed record grain"
+                    lines.append(f"- **{_md(column.name)}** is a quantitative measure at {grain} ({statement}{strength}; {relationship.confidence:.0%} confidence).")
                 elif relationship.kind == "temporal_attribute":
-                    lines.append(f"- **{column.name}** is a temporal attribute associated with observations ({statement}{strength}; {relationship.confidence:.0%} confidence).")
+                    lines.append(f"- **{_md(column.name)}** is a temporal attribute associated with observations ({statement}{strength}; {relationship.confidence:.0%} confidence).")
         one_to_one_pairs = {
             frozenset((relation.source_column, relation.target_column))
             for relation in context.relationships if relation.kind == "one_to_one"
@@ -83,21 +100,21 @@ def to_markdown(context: Any, *, include_values: bool = False) -> str:
         for relation in context.relationships:
             if relation.kind == "functional_dependency" and frozenset((relation.source_column, relation.target_column)) in one_to_one_pairs:
                 continue
-            statement = relation.evidence[0].statement if relation.evidence else "observed value mapping"
+            statement = _md(relation.evidence[0].statement) if relation.evidence else "observed value mapping"
             detail = f"{statement} · {relation.coverage:.1%} coverage · {relation.confidence:.0%} confidence"
             if relation.kind == "approximate_mapping":
                 detail += f" · {relation.affected_groups} conflicting groups · {relation.violation_count} violations · {relation.missing_pair_count} incomplete rows"
             if relation.kind == "one_to_many" and relation.evidence:
                 average = relation.evidence[0].details.get("average_entities_per_group")
                 if average is not None:
-                    detail += f" · average {average:.2f} {relation.target_column} values per {relation.source_column}"
-            lines.append(f"- **{relation.source_column} → {relation.target_column}: {relation.kind}** ({detail})")
+                    detail += f" · average {average:.2f} {_md(relation.target_column)} values per {_md(relation.source_column)}"
+            lines.append(f"- **{_md(relation.source_column)} → {_md(relation.target_column)}: {relation.kind}** ({detail})")
 
     lines += ["", "## Columns", ""]
     for col in context.columns:
         s = col.statistics
         lines += [
-            f"### {col.name}",
+            f"### {_md(col.name)}",
             "",
             f"**{col.dtype}** ({col.logical_type}) · **{col.semantic.role}** (confidence {col.semantic.confidence:.2f})",
             "",
@@ -128,21 +145,21 @@ def to_markdown(context: Any, *, include_values: bool = False) -> str:
             # The message, implication and suggestion are printed once, under
             # "Analytical warnings"; the column keeps a pointer to each warning.
             lines.extend(
-                f"- Warning [{warning.severity}]: {warning.title} (see Analytical warnings)"
+                f"- Warning [{warning.severity}]: {_md(warning.title)} (see Analytical warnings)"
                 for warning in col.warnings
             )
         if col.semantic.evidence:
             lines += ["", "<details>", "<summary>Inference evidence</summary>", ""]
-            lines.extend(f"- {e.statement}" for e in col.semantic.evidence)
+            lines.extend(f"- {_md(e.statement)}" for e in col.semantic.evidence)
             lines += ["", "</details>"]
         lines.append("")
 
     if context.warnings:
         lines += ["", "## Analytical warnings", ""]
         for warning in context.warnings:
-            lines.append(f"- **{warning.title}** ({warning.severity}): {warning.message}")
+            lines.append(f"- **{_md(warning.title)}** ({warning.severity}): {_md(warning.message)}")
             if warning.implication:
-                lines.append(f"  - Implication: {warning.implication}")
+                lines.append(f"  - Implication: {_md(warning.implication)}")
             if warning.recommendation:
-                lines.append(f"  - Suggested: {warning.recommendation}")
+                lines.append(f"  - Suggested: {_md(warning.recommendation)}")
     return "\n".join(lines).strip()

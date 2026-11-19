@@ -39,6 +39,7 @@ def detect_candidate_keys(
         rate = column_stats.distinct_count / row_count
         if (
             roles.get(name) in _SINGLE_KEY_ROLES
+            and getattr(frame[name].dtype, "kind", None) != "m"
             and rate >= _MIN_SINGLE_UNIQUENESS
             and column_stats.missing_rate <= _MAX_SINGLE_MISSING_RATE
         ):

@@ -53,6 +53,9 @@ class AnalysisSession:
             logical = "temporal"
         elif pd.api.types.is_numeric_dtype(series.dtype):
             logical = "numeric"
+        elif getattr(series.dtype, "kind", None) == "m":
+            # Elapsed durations (timedelta64) are neither identifiers nor measures here.
+            logical = "duration"
         elif isinstance(series.dtype, pd.CategoricalDtype):
             logical = "categorical"
         elif series.dtype == object or pd.api.types.is_string_dtype(series.dtype):
@@ -64,6 +67,10 @@ class AnalysisSession:
             logical = "unknown" if len(kinds) > 1 and len({"str" if issubclass(t, str) else t.__name__ for t in kinds}) > 1 else "text"
             if values.empty:
                 logical = "unknown"
+            elif pd.api.types.infer_dtype(values, skipna=True) in {
+                "integer", "floating", "mixed-integer-float"
+            }:
+                logical = "numeric"
         else:
             logical = "unknown"
         obs = ColumnObservation(str(name), series, missing, distinct, logical)

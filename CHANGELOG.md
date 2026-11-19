@@ -11,6 +11,8 @@ All notable changes to Oribi are recorded here.
 - Profile meaningful pandas indexes separately from columns and reduce identifier confidence for highly repeated low-diversity codes.
 - Count index duplicates with `Index.duplicated()`, so a single missing index entry is no longer reported as a duplicate of a unique index; repeated missing entries still count (#43).
 - Print each warning message once in `to_markdown()`: a column lists its warnings by severity and title and points to "Analytical warnings", which keeps the full message, implication and suggestion (#44).
+- Report `timedelta64` columns with the logical type `duration` and stop treating unique durations as identifiers or as a single-column key/grain (#45).
+- Escape Markdown characters in column names in `to_markdown()` and collapse line breaks in them, so names render as literal text in headings, bold text, relationships and warnings (#39).
 - Detect mixed-type object columns from every non-missing value instead of the first 100, so the logical type no longer depends on row order (#5).
 
 ## 0.1.0 — Initial release

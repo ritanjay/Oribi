@@ -225,3 +225,28 @@ def test_renderers_display_non_string_index_names(index, label, renderer):
     context = inspect(pd.DataFrame({"amount": [1.0, 2.0]}, index=index))
     assert f"({label})" in getattr(context, renderer)()
     assert context.profile.index.names == tuple(index.names)
+
+
+def test_unique_duration_column_is_not_an_identifier_or_grain():
+    context = inspect(pd.DataFrame({"elapsed": pd.to_timedelta(range(1, 11), unit="h")}))
+    column = context.columns[0]
+    assert column.semantic.role != "identifier"
+    assert context.grain.status == "undetermined"
+    assert context.grain.columns == ()
+    assert not any(candidate.verified_unique for candidate in context.candidate_keys)
+
+
+def test_duration_column_does_not_displace_integer_identifier_or_datetime_behavior():
+    frame = pd.DataFrame(
+        {
+            "order_id": range(1, 11),
+            "elapsed": pd.to_timedelta(range(1, 11), unit="h"),
+            "placed_at": pd.date_range("2024-01-01", periods=10, freq="D"),
+        }
+    )
+    context = inspect(frame)
+    roles = {column.name: column.semantic.role for column in context.columns}
+    assert roles["order_id"] == "identifier"
+    assert roles["placed_at"] == "temporal"
+    assert roles["elapsed"] != "identifier"
+    assert context.grain.columns == ("order_id",)
