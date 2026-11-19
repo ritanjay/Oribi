@@ -57,7 +57,10 @@ class AnalysisSession:
             logical = "categorical"
         elif series.dtype == object or pd.api.types.is_string_dtype(series.dtype):
             values = series.dropna()
-            kinds = {type(v) for v in values.iloc[:100]}
+            # Every non-missing value is checked, so the result does not depend on
+            # where a differently typed value sits in the column. One pass, like
+            # the nunique() above.
+            kinds = set(map(type, values.to_numpy()))
             logical = "unknown" if len(kinds) > 1 and len({"str" if issubclass(t, str) else t.__name__ for t in kinds}) > 1 else "text"
             if values.empty:
                 logical = "unknown"
