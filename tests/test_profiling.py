@@ -155,3 +155,43 @@ def test_small_number_of_temporal_gaps_keeps_detailed_output():
     assert len(warnings) == 2
     assert all("gaps_omitted" not in w.evidence[0].details for w in warnings)
     assert all(len(w.evidence[0].details["expected_timestamps"]) == 1 for w in warnings)
+
+
+def _column(values, name="value"):
+    return inspect(pd.DataFrame({name: values})).columns[0]
+
+
+def test_high_cardinality_text_columns_warn():
+    notes = _column([f"note {i} about the order" for i in range(300)], "notes")
+    tags = _column([f"tag{i % 150}" for i in range(300)], "tags")
+    for column, distinct in ((notes, 300), (tags, 150)):
+        assert column.logical_type == "text"
+        warning = next(w for w in column.warnings if w.code == "high_cardinality_text")
+        assert warning.evidence[0].details["distinct_count"] == distinct
+        assert warning.evidence[0].details["non_missing_count"] == 300
+        assert warning.evidence[0].details["uniqueness_ratio"] == distinct / 300
+
+
+def test_high_cardinality_text_ignores_missing_values_in_evidence():
+    column = _column([f"comment {i}" for i in range(120)] + [None] * 30, "comment")
+    warning = next(w for w in column.warnings if w.code == "high_cardinality_text")
+    assert warning.evidence[0].details["non_missing_count"] == 120
+    assert warning.evidence[0].details["uniqueness_ratio"] == 1.0
+
+
+def test_low_cardinality_text_and_identifiers_do_not_warn():
+    city = _column([f"city{i % 5}" for i in range(300)], "city")
+    assert city.semantic.role == "dimension"
+    assert not any(w.code == "high_cardinality_text" for w in city.warnings)
+    at_threshold = _column([f"v{i}" for i in range(100)] * 2)
+    assert not any(w.code == "high_cardinality_text" for w in at_threshold.warnings)
+    order_id = _column([f"ORD-{i:05d}" for i in range(300)], "order_id")
+    assert order_id.semantic.role == "identifier"
+    assert not any(w.code == "high_cardinality_text" for w in order_id.warnings)
+
+
+def test_categorical_high_cardinality_warning_is_unchanged():
+    group = _column(pd.Series([f"g{i}" for i in range(110)], dtype="category"), "group")
+    codes = [w.code for w in group.warnings]
+    assert "high_cardinality_category" in codes
+    assert "high_cardinality_text" not in codes
