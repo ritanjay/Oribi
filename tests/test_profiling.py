@@ -134,3 +134,26 @@ def test_small_number_of_temporal_gaps_keeps_detailed_output():
     assert len(warnings) == 2
     assert all("gaps_omitted" not in w.evidence[0].details for w in warnings)
     assert all(len(w.evidence[0].details["expected_timestamps"]) == 1 for w in warnings)
+
+
+def _logical_type(values):
+    return inspect(pd.DataFrame({"value": values})).columns[0].logical_type
+
+
+def test_mixed_object_detection_is_independent_of_row_order():
+    late = ["text"] * 100 + [1]
+    early = [1] + ["text"] * 100
+    middle = ["text"] * 50 + [1] + ["text"] * 50
+    assert _logical_type(late) == _logical_type(early) == _logical_type(middle) == "unknown"
+    reordered = pd.Series(late).sample(frac=1, random_state=0).tolist()
+    assert _logical_type(reordered) == "unknown"
+
+
+def test_mixed_object_detection_past_the_first_hundred_values():
+    assert _logical_type(["a"] * 250 + [2.5] + ["b"] * 10) == "unknown"
+    assert _logical_type(["a"] * 250 + [None, None]) == "text"
+
+
+def test_single_type_object_columns_stay_text():
+    assert _logical_type(["a"] * 300) == "text"
+    assert _logical_type(pd.Series(["a"] * 150 + [None], dtype="string")) == "text"
