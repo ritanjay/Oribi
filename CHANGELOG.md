@@ -6,6 +6,7 @@ All notable changes to Oribi are recorded here.
 
 ### Fixed
 
+- Keep the missing-parent caveat and filtered numerator out of entity-ratio metrics when only child IDs are missing. (#227)
 - Exclude missing labels from distinct counts in one-level MultiIndexes, matching ordinary indexes while preserving pandas duplicate counts. (#224)
 - Serialize NumPy datetime samples as ISO timestamps, preserving nanosecond precision in opt-in dictionary and JSON exports.
 - Serialize NumPy timedelta samples as ISO 8601 durations, preserving nanosecond precision in opt-in dictionary and JSON exports.
