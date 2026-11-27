@@ -226,12 +226,20 @@ def profile_column(
             values["zero_count"] = int((numeric == 0).sum())
             values["negative_count"] = int((numeric < 0).sum())
             if include_quantiles:
-                # Decimal interpolation cannot multiply by floating-point weights.
-                quantile_sample = (
-                    sample.astype("float64")
-                    if len(sample) and isinstance(sample.iloc[0], Decimal)
-                    else sample
-                )
+                quantile_sample = sample
+                if len(sample) and isinstance(sample.iloc[0], Decimal):
+                    # Decimal interpolation cannot multiply by floating-point weights.
+                    quantile_sample = sample.astype("float64")
+                elif (
+                    minimum is not None
+                    and maximum is not None
+                    and pd.api.types.is_signed_integer_dtype(sample.dtype)
+                ):
+                    itemsize = getattr(sample.dtype, "itemsize", 8)
+                    signed_limit = 1 << (itemsize * 8 - 1)
+                    # Interpolation subtracts the endpoints in the input dtype.
+                    if int(maximum) - int(minimum) >= signed_limit:
+                        quantile_sample = sample.astype("float64")
                 values["quantiles"] = (
                     {str(q): finite_or_none(v) for q, v in quantile_sample.quantile([.25, .5, .75]).items()}
                     if len(sample) else {}
