@@ -1052,3 +1052,82 @@ def test_deduplicated_per_entity_average_complete_mapping_control():
         "deduplicated" in caveat.lower() and "excluded" in caveat.lower()
         for caveat in rpc.caveats
     ), rpc.caveats
+
+
+@pytest.mark.parametrize("sparse", [False, True], ids=["native", "sparse"])
+def test_id_like_durations_do_not_emit_entity_metrics_and_preserve_revenue_total(sparse):
+    raw = pd.to_timedelta([1, 1, None, 3] if sparse else [1, 1, 2, 3], unit="h")
+    durations = pd.arrays.SparseArray(raw) if sparse else raw
+    revenue = [10.0, 11.0, 12.0, 13.0]
+
+    df = pd.DataFrame({"duration_id": durations, "revenue": revenue})
+    control_df = pd.DataFrame({"elapsed": durations, "revenue": revenue})
+
+    context = inspect(df)
+    control = inspect(control_df)
+    column = context.get_column("duration_id")
+
+    assert column.logical_type == "duration"
+    assert column.semantic.role == "unknown"
+    assert column.recommendations == ()
+    assert context.metrics == control.metrics
+    assert [m.name for m in context.metrics] == ["total_revenue"]
+
+    total = _metric(context, "total_revenue")
+    assert total.sql == "SUM(revenue)"
+    assert total.columns == ("revenue",)
+    assert _eval_sql(df[["revenue"]], total.sql) == pytest.approx(46.0)
+
+    for rendered in (context.to_json(), context.to_markdown(), context.to_context()):
+        assert "total_revenue" in rendered
+        assert "duration_count" not in rendered
+        assert "revenue_per_duration" not in rendered
+
+
+def test_id_like_durations_do_not_deduplicate_or_withhold_revenue_or_suppress_integer_ids():
+    # Repeated measures across equal durations must stay plain row-level sums, matching "elapsed".
+    repeated_td = pd.arrays.SparseArray(pd.to_timedelta([1, 1, 2, 2, None], unit="h"))
+    repeated_df = pd.DataFrame(
+        {
+            "duration_id": repeated_td,
+            "revenue": [10.0, 10.0, 20.0, 20.0, 50.0],
+        }
+    )
+    elapsed_df = pd.DataFrame(
+        {
+            "elapsed": repeated_td,
+            "revenue": [10.0, 10.0, 20.0, 20.0, 50.0],
+        }
+    )
+    repeated_ctx = inspect(repeated_df)
+    assert repeated_ctx.metrics == inspect(elapsed_df).metrics
+    total = _metric(repeated_ctx, "total_revenue")
+    assert total.sql == "SUM(revenue)"
+    assert _eval_sql(repeated_df[["revenue"]], total.sql) == pytest.approx(110.0)
+
+    # Genuine integer ID control keeps entity metrics alongside an ID-named duration.
+    control_frame = pd.DataFrame(
+        {
+            "order_id": [1, 1, 2, 3],
+            "duration_id": pd.to_timedelta([1, 1, 2, 3], unit="h"),
+            "revenue": [10.0, 11.0, 12.0, 13.0],
+        }
+    )
+    ordinary_duration_frame = control_frame.rename(columns={"duration_id": "elapsed"})
+    control_ctx = inspect(control_frame)
+    ordinary_ctx = inspect(ordinary_duration_frame)
+
+    assert control_ctx.get_column("order_id").semantic.role == "identifier"
+    assert control_ctx.get_column("duration_id").semantic.role == "unknown"
+    assert control_ctx.metrics == ordinary_ctx.metrics
+    assert [m.name for m in control_ctx.metrics] == [
+        "order_count",
+        "total_revenue",
+        "average_order_value",
+    ]
+    sql_frame = control_frame[["order_id", "revenue"]]
+    assert _eval_sql(sql_frame, _metric(control_ctx, "order_count").sql) == pytest.approx(3.0)
+    assert _eval_sql(sql_frame, _metric(control_ctx, "total_revenue").sql) == pytest.approx(46.0)
+    assert _eval_sql(sql_frame, _metric(control_ctx, "average_order_value").sql) == pytest.approx(
+        46.0 / 3.0
+    )

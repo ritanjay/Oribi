@@ -458,3 +458,78 @@ def test_float64_two_equal_observations_retain_zero_dispersion_claim():
 
     assert column.statistics.standard_deviation == 0
     assert "constant_numeric_values" in {e.code for e in column.semantic.evidence}
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "duration_id",
+        "elapsedId",
+        "duration_key",
+        "duration_code",
+        "duration_no",
+        "duration_number",
+        "id",
+    ],
+)
+@pytest.mark.parametrize("sparse", [False, True], ids=["native", "sparse"])
+def test_id_like_duration_names_keep_ordinary_duration_semantics(name, sparse):
+    import pandas as pd
+
+    raw = pd.to_timedelta([1, 1, None, 3] if sparse else [1, 1, 2, 3], unit="h")
+    values = pd.arrays.SparseArray(raw) if sparse else raw
+    context = inspect(pd.DataFrame({name: values}))
+    control = inspect(pd.DataFrame({"elapsed": values}))
+
+    column = context.get_column(name)
+    elapsed = control.get_column("elapsed")
+
+    assert column.dtype == elapsed.dtype == str(values.dtype)
+    assert column.logical_type == elapsed.logical_type == "duration"
+    assert column.semantic == elapsed.semantic
+    assert column.semantic.role == "unknown"
+    assert column.semantic.confidence == 0.0
+    assert column.semantic.evidence == ()
+    assert column.recommendations == elapsed.recommendations == ()
+    assert [w.code for w in column.warnings] == [w.code for w in elapsed.warnings]
+    assert "non_unique_identifier" not in {w.code for w in column.warnings}
+    assert column.relationships == elapsed.relationships
+    assert context.candidate_keys == control.candidate_keys == ()
+    assert context.grain == control.grain
+
+
+def test_id_like_temporal_and_integer_controls_keep_expected_roles():
+    import pandas as pd
+
+    frame = pd.DataFrame(
+        {
+            "order_id": [1, 1, 2, 3],
+            "constant_tag_id": ["only"] * 4,
+            "settlement_id": pd.date_range("2026-01-01", periods=4, freq="D"),
+            "duration_id": pd.to_timedelta([1, 2, 3, 4], unit="h"),
+        }
+    )
+    context = inspect(frame)
+    order_id = context.get_column("order_id")
+    constant_tag_id = context.get_column("constant_tag_id")
+    settlement_id = context.get_column("settlement_id")
+    duration_id = context.get_column("duration_id")
+
+    assert order_id.logical_type == "numeric"
+    assert order_id.semantic.role == "identifier"
+    assert "name_identifier_hint" in {e.code for e in order_id.semantic.evidence}
+    assert any(
+        rec.operation == "COUNT DISTINCT" and rec.disposition == "recommended"
+        for rec in order_id.recommendations
+    )
+
+    assert constant_tag_id.semantic.role == "dimension"
+    assert "name_identifier_hint" not in {e.code for e in constant_tag_id.semantic.evidence}
+
+    assert settlement_id.logical_type == "temporal"
+    assert settlement_id.semantic.role == "temporal"
+    assert "name_identifier_hint" not in {e.code for e in settlement_id.semantic.evidence}
+
+    assert duration_id.logical_type == "duration"
+    assert duration_id.semantic.role == "unknown"
+    assert duration_id.recommendations == ()

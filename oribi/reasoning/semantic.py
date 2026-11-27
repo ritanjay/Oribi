@@ -78,7 +78,9 @@ def infer_semantic(
     unique_named_measure = measure_name and distinct > 1 and distinct == observed
     # A suffix alone cannot establish identity when only a few codes recur.
     categorical_code_shape = row_count >= 20 and distinct <= 3 and rate <= 0.15
-    if explicit_identifier_name and distinct > 1:
+    # Elapsed durations are not entities, even when their column names resemble IDs.
+    allow_identifier_name = distinct > 1 and logical_type != "duration"
+    if explicit_identifier_name and allow_identifier_name:
         votes["identifier"] = .48 if categorical_code_shape else .78
         evidence.append(Evidence("name_identifier_hint", "Column name strongly suggests an identifier"))
         if categorical_code_shape:
@@ -88,7 +90,7 @@ def infer_semantic(
             f"Observed {distinct} distinct non-missing values",
             {"distinct_count": distinct, "row_count": row_count},
         ))
-    elif code_name and distinct > 1:
+    elif code_name and allow_identifier_name:
         votes["identifier"] = .48 if categorical_code_shape else .75
         evidence.append(Evidence("name_identifier_hint", "Column name suggests an identifier"))
         evidence.append(Evidence(
@@ -96,7 +98,7 @@ def infer_semantic(
             f"Observed {distinct} distinct non-missing values",
             {"distinct_count": distinct, "row_count": row_count},
         ))
-    elif soft_identifier_name and distinct > 1:
+    elif soft_identifier_name and allow_identifier_name:
         votes["identifier"] = .46 if categorical_code_shape else .68
         evidence.append(Evidence("name_identifier_hint", "Column name suggests an identifier"))
         evidence.append(Evidence(
