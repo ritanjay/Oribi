@@ -698,6 +698,52 @@ def test_infer_metrics_guards_one_to_many_when_child_belongs_to_multiple_parents
     assert _eval_sql(missing_parent_frame, missing_ratio.sql) == pytest.approx(2.0)
 
 
+_PLAIN_ENTITY_RATIO_SQL = "1.0 * COUNT(DISTINCT child_id) / NULLIF(COUNT(DISTINCT parent_id), 0)"
+_FILTERED_ENTITY_RATIO_SQL = (
+    "1.0 * COUNT(DISTINCT CASE WHEN parent_id IS NOT NULL THEN child_id END) / "
+    "NULLIF(COUNT(DISTINCT parent_id), 0)"
+)
+
+
+@pytest.mark.parametrize(
+    ("parent_ids", "child_ids", "expected_sql", "expects_missing_parent_caveat"),
+    [
+        pytest.param(
+            [1, 1, 1, 1, 2, 2, 2, 2, 2],
+            [11, 11, 12, 12, 21, 21, 22, 22, None],
+            _PLAIN_ENTITY_RATIO_SQL,
+            False,
+            id="child-only-null",
+        ),
+        pytest.param(
+            [1, 1, 1, 1, 2, 2, 2, 2, None],
+            [11, 11, 12, 12, 21, 21, 22, 22, 22],
+            _FILTERED_ENTITY_RATIO_SQL,
+            True,
+            id="parent-only-null",
+        ),
+        pytest.param(
+            [1, 1, 1, 1, 2, 2, 2, 2],
+            [11, 11, 12, 12, 21, 21, 22, 22],
+            _PLAIN_ENTITY_RATIO_SQL,
+            False,
+            id="complete-pairs",
+        ),
+    ],
+)
+def test_entity_ratio_missing_parent_caveat_requires_a_missing_parent(
+    parent_ids, child_ids, expected_sql, expects_missing_parent_caveat
+):
+    # #227: a missing child ID used to trigger the missing-parent caveat and filtered numerator.
+    frame = pd.DataFrame({"parent_id": parent_ids, "child_id": child_ids})
+    metric = next(m for m in inspect(frame).metrics if m.kind == "entity_ratio")
+
+    assert metric.sql == expected_sql
+    has_caveat = any("Rows missing parent_id" in caveat for caveat in metric.caveats)
+    assert has_caveat is expects_missing_parent_caveat
+    assert _eval_sql(frame, metric.sql) == pytest.approx(2.0)
+
+
 def test_sql_keywords_used_as_metric_columns_are_quoted():
     df = pd.DataFrame(
         {
