@@ -949,7 +949,9 @@ def _infer_entity_ratios(
             or rel.affected_groups > 0
             or (rel.kind == "one_to_many" and rel.coverage < 1.0 and rel.missing_pair_count == 0)
         )
-        has_missing_parent = rel.missing_pair_count > 0
+        # missing_pair_count counts rows missing either column; only a missing parent needs the
+        # filtered numerator, since a missing child is already ignored by COUNT(DISTINCT child).
+        has_missing_parent = rel.missing_pair_count > 0 and group_col.statistics.missing_count > 0
         raw_confidence = 0.50 * rel.confidence + 0.30 * avg_sem + 0.20 * min_cov
         if is_multi_parent:
             raw_confidence *= rel.coverage
